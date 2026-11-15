@@ -314,13 +314,15 @@ func (t *Endpoint) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 }
 
 func (t *Endpoint) start(scope *adapter.Scope) error {
-	if t.platformInterface != nil && t.platformInterface.UsePlatformNetworkInterfaces() {
+	usePlatformNetworkInterfaces := t.platformInterface != nil && t.platformInterface.UsePlatformNetworkInterfaces()
+	if usePlatformNetworkInterfaces {
 		err := t.network.UpdateInterfaces()
 		if err != nil {
 			return err
 		}
 	}
-	if interfaceMonitor := t.network.InterfaceMonitor(); interfaceMonitor != nil {
+	// Platforms that do not supply interfaces may install their own netmon getter; do not replace it.
+	if interfaceMonitor := t.network.InterfaceMonitor(); usePlatformNetworkInterfaces && interfaceMonitor != nil {
 		interfaceFinder := t.network.InterfaceFinder()
 		netmon.RegisterInterfaceGetter(func() ([]netmon.Interface, error) {
 			return common.Map(interfaceFinder.Interfaces(), func(it control.Interface) netmon.Interface {
