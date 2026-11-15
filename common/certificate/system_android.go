@@ -26,9 +26,5 @@ func systemCertificates() []*x509.Certificate {
 		return nil
 	}
 	defer C.free(pointer)
-	certificates, err := x509.ParseCertificates(C.GoBytes(pointer, length))
-	if err != nil {
-		return nil
-	}
-	return certificates
+	return parseDERCertificates(C.GoBytes(pointer, length))
 }
