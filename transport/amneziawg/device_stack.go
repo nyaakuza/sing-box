@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 	wgTun "github.com/amnezia-vpn/amneziawg-go/v3/tun"
@@ -33,7 +34,7 @@ type stackDevice struct {
 	events       chan wgTun.Event
 	outbound     chan *stack.PacketBuffer
 	done         chan struct{}
-	dispatcher   stack.NetworkDispatcher
+	dispatcher   atomic.Pointer[stack.NetworkDispatcher]
 	addr4        tcpip.Address
 	addr6        tcpip.Address
 	udpForwarder *tun.UDPForwarder
@@ -188,7 +189,9 @@ func (w *stackDevice) Write(bufs [][]byte, offset int) (count int, err error) {
 		packetBuffer := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			Payload: buffer.MakeWithData(b),
 		})
-		w.dispatcher.DeliverNetworkPacket(networkProtocol, packetBuffer)
+		if dispatcher := w.dispatcher.Load(); dispatcher != nil {
+			(*dispatcher).DeliverNetworkPacket(networkProtocol, packetBuffer)
+		}
 		packetBuffer.DecRef()
 		count++
 	}
@@ -257,12 +260,18 @@ func (ep *wireEndpoint) Capabilities() stack.LinkEndpointCapabilities {
 	return stack.CapabilityRXChecksumOffload
 }
 
+// Attach(nil) runs when gVisor detaches the endpoint, while the device may still write packets: Write drops
+// them then.
 func (ep *wireEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
-	ep.dispatcher = dispatcher
+	if dispatcher == nil {
+		ep.dispatcher.Store(nil)
+	} else {
+		ep.dispatcher.Store(&dispatcher)
+	}
 }
 
 func (ep *wireEndpoint) IsAttached() bool {
-	return ep.dispatcher != nil
+	return ep.dispatcher.Load() != nil
 }
 
 func (ep *wireEndpoint) Wait() {
