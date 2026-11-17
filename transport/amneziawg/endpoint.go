@@ -399,8 +399,11 @@ func IpcLines(options option.AmneziaWGObfuscationOptions) (string, error) {
 		}
 	}
 	addInt("jc", options.JunkPacketCount)
-	addInt("jmin", options.JunkPacketMinSize)
-	addInt("jmax", options.JunkPacketMaxSize)
+	// The sizes only matter with junk packets, and the device refuses jmin above jmax even without them.
+	if options.JunkPacketCount > 0 {
+		addInt("jmin", options.JunkPacketMinSize)
+		addInt("jmax", options.JunkPacketMaxSize)
+	}
 	addInt("s1", options.InitPacketJunkSize)
 	addInt("s2", options.ResponsePacketJunkSize)
 	addInt("s3", options.CookieReplyPacketJunkSize)

@@ -145,3 +145,14 @@ func TestEndpointRejectsInvalidKeysAndParameterInjection(t *testing.T) {
 		t.Fatal("refused paddings at the limit:", err)
 	}
 }
+
+func TestIpcLinesJunkSizesOnlyWithJunkPackets(t *testing.T) {
+	lines, err := IpcLines(option.AmneziaWGObfuscationOptions{JunkPacketMinSize: 200})
+	if err != nil || lines != "" {
+		t.Fatalf("without junk packets: %q, %v", lines, err)
+	}
+	lines, err = IpcLines(option.AmneziaWGObfuscationOptions{JunkPacketCount: 4, JunkPacketMinSize: 40, JunkPacketMaxSize: 70})
+	if err != nil || lines != "jc=4\njmin=40\njmax=70\n" {
+		t.Fatalf("with junk packets: %q, %v", lines, err)
+	}
+}
