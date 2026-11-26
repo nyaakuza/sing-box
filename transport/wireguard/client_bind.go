@@ -32,6 +32,9 @@ type ClientBind struct {
 	done                chan struct{}
 	destination         M.Socksaddr
 	reserved            [3]uint8
+	// The device sends from one goroutine per peer, and detour packet connections (VLESS, for one)
+	// are not all safe for concurrent writes.
+	writeAccess sync.Mutex
 }
 
 func NewClientBind(ctx context.Context, logger logger.Logger, dialer N.Dialer, destination M.Socksaddr, reserved [3]uint8) *ClientBind {
@@ -168,7 +171,9 @@ func (c *ClientBind) Send(bufs [][]byte, ep conn.Endpoint, offset int) error {
 			}
 			copy(buf[1:4], reserved[:])
 		}
+		c.writeAccess.Lock()
 		_, err = udpConn.WriteTo(buf, M.SocksaddrFromNetIP(destination).UDPAddr())
+		c.writeAccess.Unlock()
 		if err != nil {
 			udpConn.Close()
 			return err

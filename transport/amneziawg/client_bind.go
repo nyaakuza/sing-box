@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -31,6 +32,10 @@ type ClientBind struct {
 	destination         M.Socksaddr
 	reserved            [3]uint8
 	rewriteReserved     bool
+	// The device sends from one goroutine per peer, and detour packet connections (VLESS, for one)
+	// are not all safe for concurrent writes; a plain UDP socket is.
+	serializeWrites bool
+	writeAccess     sync.Mutex
 }
 
 func NewClientBind(ctx context.Context, logger logger.Logger, dialer N.Dialer, destination M.Socksaddr, reserved [3]uint8) *ClientBind {
@@ -41,9 +46,15 @@ func NewClientBind(ctx context.Context, logger logger.Logger, dialer N.Dialer, d
 		reservedForEndpoint: make(map[netip.AddrPort][3]uint8),
 		done:                make(chan struct{}),
 		destination:         destination,
+		serializeWrites:     !isUDPListener(dialer),
 		reserved:            reserved,
 		rewriteReserved:     reserved != [3]uint8{},
 	}
+}
+
+func isUDPListener(d N.Dialer) bool {
+	_, isListener := common.Cast[dialer.UDPListener](d)
+	return isListener
 }
 
 func (c *ClientBind) connect() (*wireConn, error) {
@@ -161,7 +172,13 @@ func (c *ClientBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 		if len(b) > 3 && rewriteReserved {
 			copy(b[1:4], reserved[:])
 		}
+		if c.serializeWrites {
+			c.writeAccess.Lock()
+		}
 		_, err = udpConn.WriteTo(b, M.SocksaddrFromNetIP(destination).UDPAddr())
+		if c.serializeWrites {
+			c.writeAccess.Unlock()
+		}
 		if err != nil {
 			udpConn.Close()
 			return err
