@@ -347,6 +347,6 @@ func parseServerDecryption(raw string) (serverDecryptionConfig, error) {
 	return cfg, nil
 }
 
-func (h *Inbound) References() []string {
-	return h.references
+func (h *Inbound) References() ([]string, []string) {
+	return h.references, nil
 }

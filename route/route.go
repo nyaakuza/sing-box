@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,8 +28,6 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/uot"
-
-	"golang.org/x/exp/slices"
 )
 
 var defaultPacketSniffers = []sniff.PacketSniffer{
@@ -136,7 +135,7 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 			}
 			return action.Error(ctx)
 		case *R.RuleActionHijackDNS:
-			for _, buffer := range buffers {
+			for _, buffer := range slices.Backward(buffers) {
 				conn = bufio.NewCachedConn(conn, buffer)
 			}
 			N.CloseOnHandshakeFailure(conn, onClose, r.hijackDNSStream(ctx, conn, metadata))
@@ -151,7 +150,7 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 		buf.ReleaseMulti(buffers)
 		return err
 	}
-	for _, buffer := range buffers {
+	for _, buffer := range slices.Backward(buffers) {
 		conn = bufio.NewCachedConn(conn, buffer)
 	}
 	if selectedRule != nil {
@@ -309,7 +308,7 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 		N.ReleaseMultiPacketBuffer(packetBuffers)
 		return err
 	}
-	for _, buffer := range packetBuffers {
+	for _, buffer := range slices.Backward(packetBuffers) {
 		conn = bufio.NewCachedPacketConn(conn, buffer.Buffer, buffer.Destination)
 		N.PutPacketBuffer(buffer)
 	}
@@ -587,13 +586,15 @@ func (r *Router) prepareMatchMetadata(ctx context.Context, metadata *adapter.Inb
 				Port: metadata.Destination.Port,
 			}
 			metadata.FakeIP = true
+			metadata.ECHPublicName = r.dns.LookupECHPublicName(domain)
 			r.logger.DebugContext(ctx, "found fakeip domain: ", domain)
 		}
 	} else if metadata.Domain == "" {
 		domain, loaded := r.dns.LookupReverseMapping(metadata.Destination.Addr)
 		if loaded {
 			metadata.Domain = domain
-			r.logger.DebugContext(ctx, "found reserve mapped domain: ", metadata.Domain)
+			metadata.ECHPublicName = r.dns.LookupECHPublicName(domain)
+			r.logger.DebugContext(ctx, "found reverse mapped domain: ", metadata.Domain)
 		}
 	}
 	if metadata.Destination.IsIPv4() {
@@ -650,12 +651,6 @@ match:
 			applyRouteOptionsOverride(metadata, routeOptions)
 			if routeOptions.NetworkStrategy != nil {
 				metadata.NetworkStrategy = routeOptions.NetworkStrategy
-			}
-			if len(routeOptions.NetworkType) > 0 {
-				metadata.NetworkType = routeOptions.NetworkType
-			}
-			if len(routeOptions.FallbackNetworkType) > 0 {
-				metadata.FallbackNetworkType = routeOptions.FallbackNetworkType
 			}
 			if routeOptions.FallbackDelay != 0 {
 				metadata.FallbackDelay = routeOptions.FallbackDelay
