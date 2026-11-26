@@ -94,6 +94,10 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if options.TLS.Reality != nil && options.TLS.Reality.Enabled {
 		return nil, E.New("reality is not supported on naive outbound")
 	}
+	// Cronet verifies the certificate itself and would ignore these checks.
+	if len(options.TLS.CertificateSHA256) > 0 || len(options.TLS.VerifyCertificateByName) > 0 {
+		return nil, E.New("certificate_sha256 and verify_certificate_by_name are not supported on naive outbound")
+	}
 
 	serverAddress := options.ServerOptions.Build()
 
