@@ -23,8 +23,9 @@ func (testDialer) DialContext(ctx context.Context, network string, destination M
 	return (&net.Dialer{}).DialContext(ctx, network, destination.String())
 }
 
+// The destination only selects the address family, as for the default dialer.
 func (testDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	return (&net.ListenConfig{}).ListenPacket(ctx, "udp", destination.String())
+	return (&net.ListenConfig{}).ListenPacket(ctx, "udp", "127.0.0.1:0")
 }
 
 func TestClientBindPreservesMagicHeaders(t *testing.T) {
@@ -39,7 +40,7 @@ func TestClientBindPreservesMagicHeaders(t *testing.T) {
 				t.Fatal(err)
 			}
 			address := server.LocalAddr().(*net.UDPAddr).AddrPort()
-			bind := NewClientBind(context.Background(), log.StdLogger(), testDialer{}, true, address, reserved)
+			bind := NewClientBind(context.Background(), log.StdLogger(), testDialer{}, M.SocksaddrFromNetIP(address), reserved)
 			defer bind.Close()
 			if _, _, err = bind.Open(0); err != nil {
 				t.Fatal(err)
@@ -80,6 +81,60 @@ func TestClientBindPreservesMagicHeaders(t *testing.T) {
 	}
 }
 
+// A peer may answer from another of its addresses; a connected socket would drop those replies.
+func TestClientBindReceivesFromOtherPeerAddresses(t *testing.T) {
+	server, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	other, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	address := server.LocalAddr().(*net.UDPAddr).AddrPort()
+	bind := NewClientBind(context.Background(), log.StdLogger(), testDialer{}, M.SocksaddrFromNetIP(address), [3]byte{})
+	defer bind.Close()
+	if _, _, err = bind.Open(0); err != nil {
+		t.Fatal(err)
+	}
+	if err = bind.Send([][]byte{{1, 0, 0, 0, 1}}, remoteEndpoint(address)); err != nil {
+		t.Fatal(err)
+	}
+	if err = server.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_, client, err := server.ReadFrom(make([]byte, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = other.WriteTo([]byte{2, 0, 0, 0, 2}, client); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		endpoint conn.Endpoint
+		err      error
+	}
+	received := make(chan result, 1)
+	go func() {
+		endpoints := make([]conn.Endpoint, 1)
+		_, err := bind.receive([][]byte{make([]byte, 16)}, make([]int, 1), endpoints)
+		received <- result{endpoints[0], err}
+	}()
+	select {
+	case r := <-received:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if want := other.LocalAddr().String(); r.endpoint == nil || r.endpoint.DstToString() != want {
+			t.Fatalf("reply endpoint %v, want %s", r.endpoint, want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the reply from the other address was dropped")
+	}
+}
+
 func TestReservedUpdatesWhileSending(t *testing.T) {
 	server, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
@@ -87,7 +142,7 @@ func TestReservedUpdatesWhileSending(t *testing.T) {
 	}
 	defer server.Close()
 	address := server.LocalAddr().(*net.UDPAddr).AddrPort()
-	bind := NewClientBind(context.Background(), log.StdLogger(), testDialer{}, true, address, [3]byte{1, 2, 3})
+	bind := NewClientBind(context.Background(), log.StdLogger(), testDialer{}, M.SocksaddrFromNetIP(address), [3]byte{1, 2, 3})
 	if _, _, err := bind.Open(0); err != nil {
 		t.Fatal(err)
 	}
