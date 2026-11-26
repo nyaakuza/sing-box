@@ -1,7 +1,10 @@
 package option
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 
@@ -118,6 +121,8 @@ type OutboundTLSOptions struct {
 	Certificate                badoption.Listable[string]          `json:"certificate,omitempty"`
 	CertificatePath            string                              `json:"certificate_path,omitempty"`
 	CertificatePublicKeySHA256 badoption.Listable[[]byte]          `json:"certificate_public_key_sha256,omitempty"`
+	CertificateSHA256          badoption.Listable[CertificateHash] `json:"certificate_sha256,omitempty"`
+	VerifyCertificateByName    badoption.Listable[string]          `json:"verify_certificate_by_name,omitempty"`
 	ClientCertificate          badoption.Listable[string]          `json:"client_certificate,omitempty"`
 	ClientCertificatePath      string                              `json:"client_certificate_path,omitempty"`
 	ClientKey                  badoption.Listable[string]          `json:"client_key,omitempty"`
@@ -253,4 +258,33 @@ type OutboundRealityOptions struct {
 	Enabled   bool   `json:"enabled,omitempty"`
 	PublicKey string `json:"public_key,omitempty"`
 	ShortID   string `json:"short_id,omitempty"`
+}
+
+// CertificateHash is the SHA-256 hash of a DER certificate, written in hex as Xray's pinnedPeerCertSha256
+// (any case, optional ':' separators as openssl prints them) or in base64.
+type CertificateHash []byte
+
+func (h CertificateHash) MarshalJSON() ([]byte, error) {
+	return json.Marshal(base64.StdEncoding.EncodeToString(h))
+}
+
+func (h *CertificateHash) UnmarshalJSON(data []byte) error {
+	var stringValue string
+	err := json.Unmarshal(data, &stringValue)
+	if err != nil {
+		return err
+	}
+	stringValue = strings.TrimSpace(stringValue)
+	value, err := hex.DecodeString(strings.ReplaceAll(stringValue, ":", ""))
+	if err != nil || len(value) != sha256.Size {
+		value, err = base64.StdEncoding.DecodeString(stringValue)
+		if err != nil {
+			return E.New("invalid certificate_sha256: ", stringValue)
+		}
+	}
+	if len(value) != sha256.Size {
+		return E.New("invalid certificate_sha256 length: ", len(value))
+	}
+	*h = value
+	return nil
 }

@@ -123,6 +123,8 @@ icon: material/new-box
   "certificate": "",
   "certificate_path": "",
   "certificate_public_key_sha256": [],
+  "certificate_sha256": [],
+  "verify_certificate_by_name": [],
   "client_certificate": [],
   "client_certificate_path": "",
   "client_key": [],
@@ -332,6 +334,37 @@ openssl x509 -in certificate.pem -pubkey -noout | openssl pkey -pubin -outform d
 # For a certificate from a remote server
 echo | openssl s_client -servername example.com -connect example.com:443 2>/dev/null | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64
 ```
+
+#### certificate_sha256
+
+==Client only==
+
+List of SHA-256 hashes of server certificates (of the whole DER certificate, not its public key), as Xray's
+`pinnedPeerCertSha256`. Each hash is hex, in any case and with or without `:` separators as `openssl x509 -fingerprint
+-sha256` prints it, or base64. A hash of another length is refused when the configuration is read.
+
+The check follows Xray-core (`transport/internet/tls/config.go`, `verifyChain`):
+
+* a hash matching the leaf certificate accepts it without a CA or server name check, so self-signed certificates work;
+* otherwise a hash matching a CA certificate further up the presented chain makes that certificate the only trust root,
+  and the leaf must chain to it and match `server_name` (or `verify_certificate_by_name`);
+* otherwise the handshake fails.
+
+`insecure` does not turn the check off. Conflicts with `certificate`, `certificate_path` and
+`certificate_public_key_sha256`. Only the `go` engine supports it, with or without uTLS and ECH; not REALITY.
+
+```bash
+openssl x509 -in certificate.pem -noout -fingerprint -sha256
+```
+
+#### verify_certificate_by_name
+
+==Client only==
+
+Names checked against the server certificate instead of `server_name`, as Xray's `verifyPeerCertByName`: the
+certificate must chain to a trusted root (the system roots, `certificate`, or a CA matched by `certificate_sha256`) and be
+valid for at least one of the names. `server_name` is still sent as SNI but not checked. A leaf matched by
+`certificate_sha256` is accepted without this check. `insecure` does not turn it off.
 
 #### client_certificate
 

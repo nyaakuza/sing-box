@@ -88,6 +88,9 @@ func NewClientWithOptions(options ClientOptions) (Config, error) {
 	if options.Options.KernelRx {
 		options.Logger.Warn("enabling kTLS RX will definitely reduce performance, please checkout https://sing-box.sagernet.org/configuration/shared/tls/#kernel_rx")
 	}
+	if (len(options.Options.CertificateSHA256) > 0 || len(options.Options.VerifyCertificateByName) > 0) && options.Options.Engine != "" && options.Options.Engine != C.TLSEngineGo {
+		return nil, E.New("certificate_sha256 and verify_certificate_by_name are only supported by the go tls engine")
+	}
 	switch options.Options.Engine {
 	case "", C.TLSEngineGo:
 	case C.TLSEngineApple:

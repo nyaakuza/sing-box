@@ -33,6 +33,7 @@ type UTLSClientConfig struct {
 	serverName            string
 	disableSNI            bool
 	verifyServerName      bool
+	certificatePin        *certificatePin
 	handshakeTimeout      time.Duration
 	id                    utls.ClientHelloID
 	fragment              bool
@@ -48,6 +49,9 @@ func (c *UTLSClientConfig) ServerName() string {
 
 func (c *UTLSClientConfig) SetServerName(serverName string) {
 	c.serverName = serverName
+	if c.certificatePin != nil {
+		c.config.VerifyPeerCertificate = c.certificatePin.verifier(serverName)
+	}
 	if c.disableSNI {
 		c.config.ServerName = ""
 		if c.verifyServerName {
@@ -105,6 +109,7 @@ func (c *UTLSClientConfig) Clone() Config {
 		serverName:            c.serverName,
 		disableSNI:            c.disableSNI,
 		verifyServerName:      c.verifyServerName,
+		certificatePin:        c.certificatePin,
 		handshakeTimeout:      c.handshakeTimeout,
 		id:                    c.id,
 		fragment:              c.fragment,
@@ -303,6 +308,13 @@ func newUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddre
 	} else if len(clientCertificate) > 0 || len(clientKey) > 0 {
 		return nil, E.New("client certificate and client key must be provided together")
 	}
+	certificatePin, err := newCertificatePin(options, tlsConfig.RootCAs, tlsConfig.Time)
+	if err != nil {
+		return nil, err
+	}
+	if certificatePin != nil {
+		tlsConfig.InsecureSkipVerify = true
+	}
 	var handshakeTimeout time.Duration
 	if options.HandshakeTimeout > 0 {
 		handshakeTimeout = options.HandshakeTimeout.Build()
@@ -322,7 +334,8 @@ func newUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddre
 		config:                &tlsConfig,
 		serverName:            serverName,
 		disableSNI:            options.DisableSNI,
-		verifyServerName:      options.DisableSNI && !options.Insecure,
+		verifyServerName:      options.DisableSNI && !options.Insecure && certificatePin == nil,
+		certificatePin:        certificatePin,
 		handshakeTimeout:      handshakeTimeout,
 		id:                    id,
 		fragment:              options.Fragment,

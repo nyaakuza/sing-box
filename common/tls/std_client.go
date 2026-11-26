@@ -28,6 +28,7 @@ type STDClientConfig struct {
 	serverName            string
 	disableSNI            bool
 	verifyServerName      bool
+	certificatePin        *certificatePin
 	handshakeTimeout      time.Duration
 	fragment              bool
 	fragmentFallbackDelay time.Duration
@@ -42,6 +43,9 @@ func (c *STDClientConfig) ServerName() string {
 
 func (c *STDClientConfig) SetServerName(serverName string) {
 	c.serverName = serverName
+	if c.certificatePin != nil {
+		c.config.VerifyPeerCertificate = c.certificatePin.verifier(serverName)
+	}
 	if c.disableSNI {
 		c.config.ServerName = ""
 		if c.verifyServerName {
@@ -92,6 +96,7 @@ func (c *STDClientConfig) Clone() Config {
 		serverName:            c.serverName,
 		disableSNI:            c.disableSNI,
 		verifyServerName:      c.verifyServerName,
+		certificatePin:        c.certificatePin,
 		handshakeTimeout:      c.handshakeTimeout,
 		fragment:              c.fragment,
 		fragmentFallbackDelay: c.fragmentFallbackDelay,
@@ -221,6 +226,13 @@ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
 	} else if len(clientCertificate) > 0 || len(clientKey) > 0 {
 		return nil, E.New("client certificate and client key must be provided together")
 	}
+	certificatePin, err := newCertificatePin(options, tlsConfig.RootCAs, tlsConfig.Time)
+	if err != nil {
+		return nil, err
+	}
+	if certificatePin != nil {
+		tlsConfig.InsecureSkipVerify = true
+	}
 	var handshakeTimeout time.Duration
 	if options.HandshakeTimeout > 0 {
 		handshakeTimeout = options.HandshakeTimeout.Build()
@@ -236,7 +248,8 @@ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
 		config:                &tlsConfig,
 		serverName:            serverName,
 		disableSNI:            options.DisableSNI,
-		verifyServerName:      options.DisableSNI && !options.Insecure,
+		verifyServerName:      options.DisableSNI && !options.Insecure && certificatePin == nil,
+		certificatePin:        certificatePin,
 		handshakeTimeout:      handshakeTimeout,
 		fragment:              options.Fragment,
 		fragmentFallbackDelay: time.Duration(options.FragmentFallbackDelay),
